@@ -18,7 +18,6 @@ add_library(realsteel SHARED ${REALSTEEL_SOURCES})
 
 target_include_directories(realsteel PRIVATE
     "${REPO_ROOT}"
-    "${GENERATION_DIR}" # harmless if unused
     "${GENERATED_DIR}"
     "${SRC_DIR}"
 )
