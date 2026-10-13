@@ -16,8 +16,6 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Point REXSDK_DIR to the checked-in SDK at repo/thirdparty/rexglue-sdk
-                // Adjust path if you put the SDK elsewhere.
                 arguments "-DREXSDK_DIR=${projectDir}/../../thirdparty/rexglue-sdk"
                 cppFlags "-std=c++23 -frtti -fexceptions"
             }
@@ -41,7 +39,7 @@ android {
 
     externalNativeBuild {
         cmake {
-            path "CMakeLists.txt" // points to android/app/CMakeLists.txt
+            path "CMakeLists.txt"
             version "3.22.1"
         }
     }
