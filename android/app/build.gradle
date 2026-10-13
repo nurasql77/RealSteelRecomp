@@ -16,9 +16,9 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Егер сіз репоға rexglue-sdk қоссаңыз, осы аргументпен оның орналасуын көрсетуге болады.
-                // Мысал: "-DREXSDK_DIR=${projectDir}/../thirdparty/rexglue-sdk"
-                arguments "-DREXSDK_DIR=${projectDir}/../thirdparty/rexglue-sdk"
+                // Point REXSDK_DIR to the checked-in SDK at repo/thirdparty/rexglue-sdk
+                // Adjust path if you put the SDK elsewhere.
+                arguments "-DREXSDK_DIR=${projectDir}/../../thirdparty/rexglue-sdk"
                 cppFlags "-std=c++23 -frtti -fexceptions"
             }
         }
@@ -35,7 +35,7 @@ android {
             ndk {
                 abiFilters 'armeabi-v7a', 'arm64-v8a'
             }
-            // signingConfig go here if you later add keystore
+            // add signingConfig if you provide keystore via secrets
         }
     }
 
