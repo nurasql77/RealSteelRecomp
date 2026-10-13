@@ -1,0 +1,116 @@
+name: Android CI — Build APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      native_libs_path:
+        description: 'Optional path in the repo to native libs to copy into android/app/src/main/jniLibs (e.g. native_libs/)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip wget
+
+      - name: Install Android command-line tools
+        run: |
+          set -e
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          cd "$ANDROID_SDK_ROOT"
+          curl -sSLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q cmdline-tools.zip -d cmdline-tools
+          rm cmdline-tools.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/cmdline-tools/* cmdline-tools/latest/ || true
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses
+        env:
+          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+
+      - name: Install Android SDK packages
+        run: |
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653"
+        env:
+          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+
+      - name: Ensure Gradle wrapper exists (generate if missing)
+        run: |
+          if [ ! -f android/gradlew ]; then
+            echo "android/gradlew not found — downloading Gradle and generating wrapper"
+            wget https://services.gradle.org/distributions/gradle-7.6-bin.zip -O /tmp/gradle.zip
+            unzip -q /tmp/gradle.zip -d /opt/gradle
+            export PATH=/opt/gradle/gradle-7.6/bin:$PATH
+            cd android
+            gradle wrapper --gradle-version 7.6
+            cd -
+          else
+            echo "gradlew exists, skipping wrapper generation"
+          fi
+
+      - name: Optionally inject native libraries from repo into app jniLibs
+        if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.native_libs_path != '' ) }}
+        run: |
+          SRC_PATH="${{ github.workspace }}/${{ github.event.inputs.native_libs_path }}"
+          DST_PATH="${{ github.workspace }}/android/app/src/main/jniLibs"
+          echo "Copying native libs from $SRC_PATH to $DST_PATH"
+          if [ ! -d "$SRC_PATH" ]; then
+            echo "Provided native_libs_path does not exist in repo: $SRC_PATH"
+            exit 1
+          fi
+          mkdir -p "$DST_PATH"
+          cp -a "$SRC_PATH"/* "$DST_PATH"/ || true
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Decode keystore (if provided via secrets)
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "Decoding keystore from secret into android/app/mykeystore.jks"
+          mkdir -p android/app
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/mykeystore.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload Debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-debug
+          path: android/app/build/outputs/apk/**/*.apk
+
+      - name: Build Release APK
+        run: |
+          cd android
+          ./gradlew --no-daemon assembleRelease || true
+
+      - name: Upload Release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-release
+          path: android/app/build/outputs/apk/**/*.apk
