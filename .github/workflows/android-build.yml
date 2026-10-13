@@ -5,21 +5,24 @@ on:
     branches: [ main ]
   pull_request:
   workflow_dispatch:
-    inputs:
-      native_libs_path:
-        description: 'Optional path in the repo to native libs to copy into android/app/src/main/jniLibs (e.g. native_libs/)'
-        required: false
-        default: ''
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+  REXSDK_COMMIT: f5337cdc947ff6d4c4196737e2c807a48f2a1fc2
 
 jobs:
   build:
+    name: Build Real Steel Android
     runs-on: ubuntu-latest
-    env:
-      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
     steps:
-      - name: Checkout repository
+      - name: Checkout RealSteelRecomp
         uses: actions/checkout@v4
+        with:
+          fetch-tags: false
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -27,90 +30,94 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip wget
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Install Android command-line tools
+      - name: Install Android SDK / NDK / CMake
         run: |
-          set -e
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          cd "$ANDROID_SDK_ROOT"
-          curl -sSLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q cmdline-tools.zip -d cmdline-tools
-          rm cmdline-tools.zip
-          mkdir -p cmdline-tools/latest
-          mv cmdline-tools/cmdline-tools/* cmdline-tools/latest/ || true
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-          yes | sdkmanager --licenses
-        env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+          yes | sdkmanager --licenses || true
 
-      - name: Install Android SDK packages
-        run: |
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653"
-        env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2" \
+            "ndk;25.2.9519653" \
+            "cmake;3.22.1"
 
-      - name: Ensure Gradle wrapper exists (generate if missing)
+      - name: Clone ReXGlue SDK
         run: |
-          if [ ! -f android/gradlew ]; then
-            echo "android/gradlew not found — downloading Gradle and generating wrapper"
-            wget https://services.gradle.org/distributions/gradle-7.6-bin.zip -O /tmp/gradle.zip
-            unzip -q /tmp/gradle.zip -d /opt/gradle
-            export PATH=/opt/gradle/gradle-7.6/bin:$PATH
-            cd android
-            gradle wrapper --gradle-version 7.6
-            cd -
-          else
-            echo "gradlew exists, skipping wrapper generation"
+          git -c core.autocrlf=false clone \
+            --no-checkout \
+            https://github.com/rexglue/rexglue-sdk.git \
+            thirdparty/rexglue-sdk
+
+          git -C thirdparty/rexglue-sdk \
+            -c core.autocrlf=false checkout \
+            "$REXSDK_COMMIT"
+
+          git -C thirdparty/rexglue-sdk \
+            -c core.autocrlf=false submodule update \
+            --init --recursive
+
+      - name: Apply ReXGlue house patch
+        run: |
+          git -C thirdparty/rexglue-sdk \
+            apply \
+            --whitespace=nowarn \
+            --ignore-whitespace \
+            "$GITHUB_WORKSPACE/patches/house-sdk.patch"
+
+      - name: Verify SDK
+        run: |
+          test -f thirdparty/rexglue-sdk/CMakeLists.txt
+          test -f generated/rexglue.cmake
+          test -d generated/default
+          echo "ReXGlue SDK:"
+          git -C thirdparty/rexglue-sdk rev-parse HEAD
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate Gradle wrapper
+        working-directory: android
+        run: |
+          if [ ! -f gradlew ]; then
+            gradle wrapper --gradle-version 8.5
           fi
 
-      - name: Optionally inject native libraries from repo into app jniLibs
-        if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.native_libs_path != '' ) }}
-        run: |
-          SRC_PATH="${{ github.workspace }}/${{ github.event.inputs.native_libs_path }}"
-          DST_PATH="${{ github.workspace }}/android/app/src/main/jniLibs"
-          echo "Copying native libs from $SRC_PATH to $DST_PATH"
-          if [ ! -d "$SRC_PATH" ]; then
-            echo "Provided native_libs_path does not exist in repo: $SRC_PATH"
-            exit 1
-          fi
-          mkdir -p "$DST_PATH"
-          cp -a "$SRC_PATH"/* "$DST_PATH"/ || true
-
-      - name: Make gradlew executable
+      - name: Make Gradle executable
         run: chmod +x android/gradlew
 
-      - name: Decode keystore (if provided via secrets)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        run: |
-          echo "Decoding keystore from secret into android/app/mykeystore.jks"
-          mkdir -p android/app
-          echo "$KEYSTORE_BASE64" | base64 -d > android/app/mykeystore.jks
+      - name: Build native Android library
+        working-directory: android
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/25.2.9519653
+        run: |
+          ./gradlew \
+            --no-daemon \
+            :app:externalNativeBuildDebug
+
+      - name: Show native libraries
+        run: |
+          find android/app/build -type f \
+            \( -name "*.so" -o -name "*.a" \) \
+            -print
 
       - name: Build Debug APK
+        working-directory: android
         run: |
-          cd android
-          ./gradlew --no-daemon assembleDebug
+          ./gradlew \
+            --no-daemon \
+            assembleDebug
 
-      - name: Upload Debug APK artifact
+      - name: Verify APK
+        run: |
+          find android/app/build/outputs \
+            -type f -name "*.apk" -print
+
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: apk-debug
-          path: android/app/build/outputs/apk/**/*.apk
-
-      - name: Build Release APK
-        run: |
-          cd android
-          ./gradlew --no-daemon assembleRelease || true
-
-      - name: Upload Release APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk-release
-          path: android/app/build/outputs/apk/**/*.apk
+          name: realsteel-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
