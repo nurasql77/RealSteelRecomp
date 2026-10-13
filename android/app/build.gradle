@@ -9,25 +9,43 @@ android {
         targetSdk 33
         versionCode 1
         versionName "0.1"
+
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                // Егер сіз репоға rexglue-sdk қоссаңыз, осы аргументпен оның орналасуын көрсетуге болады.
+                // Мысал: "-DREXSDK_DIR=${projectDir}/../thirdparty/rexglue-sdk"
+                arguments "-DREXSDK_DIR=${projectDir}/../thirdparty/rexglue-sdk"
+                cppFlags "-std=c++23 -frtti -fexceptions"
+            }
+        }
     }
 
     buildTypes {
         debug {
-            // debug config
             ndk {
                 abiFilters 'armeabi-v7a', 'arm64-v8a'
             }
         }
         release {
-            // unsigned by default; configure signingConfig if you provide keystore via secrets
             minifyEnabled false
             ndk {
                 abiFilters 'armeabi-v7a', 'arm64-v8a'
             }
+            // signingConfig go here if you later add keystore
         }
     }
 
-    // If you later want to build from CMake you can add externalNativeBuild config here.
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt" // points to android/app/CMakeLists.txt
+            version "3.22.1"
+        }
+    }
+
     sourceSets {
         main {
             jniLibs.srcDirs = ['src/main/jniLibs']
