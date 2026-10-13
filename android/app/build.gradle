@@ -1,0 +1,42 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdk 33
+
+    defaultConfig {
+        applicationId "com.realsteel.recomp"
+        minSdk 21
+        targetSdk 33
+        versionCode 1
+        versionName "0.1"
+    }
+
+    buildTypes {
+        debug {
+            // debug config
+            ndk {
+                abiFilters 'armeabi-v7a', 'arm64-v8a'
+            }
+        }
+        release {
+            // unsigned by default; configure signingConfig if you provide keystore via secrets
+            minifyEnabled false
+            ndk {
+                abiFilters 'armeabi-v7a', 'arm64-v8a'
+            }
+        }
+    }
+
+    // If you later want to build from CMake you can add externalNativeBuild config here.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+            assets.srcDirs = ['src/main/assets']
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.9.0'
+}
